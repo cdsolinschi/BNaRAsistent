@@ -2,7 +2,7 @@
 (function () {
   // This is the URL where your chat application is deployed.
   // **IMPORTANT**: Replace this with your actual deployment URL.
-  const WIDGET_URL = "https://your-deployment-url.com";
+  const WIDGET_URL = "https://b-na-r-asistent-ig3y.vercel.app";
 
   // Create a container for the widget
   const widgetContainer = document.createElement('div');
