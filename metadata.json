@@ -1,0 +1,5 @@
+{
+  "name": "BibNat AI Assistant",
+  "description": "An AI-powered chat reference service trained to answer questions based on information from the bibnat.ro domain, designed to assist users of the National Library of Romania.",
+  "requestFramePermissions": []
+}
