@@ -1,112 +1,120 @@
-
-(function () {
-  // This is the URL where your chat application is deployed.
-  // **IMPORTANT**: Replace this with your actual deployment URL.
+// Self-executing function to avoid polluting the global scope
+(function() {
+  // 1. Define the URL of your deployed chat application.
+  // This is your Vercel URL.
   const WIDGET_URL = "https://b-na-r-asistent-ig3y.vercel.app";
 
-  // Create a container for the widget
-  const widgetContainer = document.createElement('div');
-  widgetContainer.id = 'bibnat-ai-widget-container';
-  document.body.appendChild(widgetContainer);
+  // State to track if the chat is open
+  let isChatOpen = false;
 
-  const style = document.createElement('style');
-  style.innerHTML = `
-    #bibnat-ai-widget-container {
+  // 2. Create the main elements
+  const widgetButton = document.createElement('button');
+  const widgetContainer = document.createElement('div');
+  const chatIframe = document.createElement('iframe');
+
+  // 3. Configure the chat iframe
+  chatIframe.src = WIDGET_URL;
+  chatIframe.id = 'bibnat-ai-iframe';
+  chatIframe.style.border = 'none';
+  chatIframe.style.width = '100%';
+  chatIframe.style.height = '100%';
+
+  // 4. Create the CSS styles to be injected
+  const styles = `
+    #bibnat-ai-button {
       position: fixed;
       bottom: 20px;
       right: 20px;
-      z-index: 9999;
-    }
-    #bibnat-chat-button {
-      background-color: #2563EB; /* blue-600 */
-      color: white;
       width: 60px;
       height: 60px;
-      border-radius: 50%;
+      background-color: #1e3a8a; /* A darker blue, more official */
       border: none;
+      border-radius: 50%;
+      box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
       cursor: pointer;
       display: flex;
       align-items: center;
       justify-content: center;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-      transition: transform 0.2s ease-in-out;
+      z-index: 9999;
+      transition: transform 0.2s ease-in-out, background-color 0.2s;
     }
-    #bibnat-chat-button:hover {
+    #bibnat-ai-button:hover {
       transform: scale(1.1);
+      background-color: #1c347d;
     }
-    #bibnat-chat-button.open svg.chat-icon {
-      display: none;
+    #bibnat-ai-button svg {
+      width: 32px;
+      height: 32px;
+      color: white;
+      transition: transform 0.3s ease;
     }
-    #bibnat-chat-button.open svg.close-icon {
-      display: block;
-    }
-    #bibnat-chat-button svg.close-icon {
-      display: none;
-    }
-    #bibnat-chat-frame-container {
+    #bibnat-ai-container {
       position: fixed;
-      bottom: 100px;
+      bottom: 90px;
       right: 20px;
       width: 90vw;
       max-width: 400px;
       height: 70vh;
       max-height: 600px;
-      box-shadow: 0 10px 15px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
       border-radius: 16px;
       overflow: hidden;
-      display: none; /* Initially hidden */
-      flex-direction: column;
-      background-color: white;
+      display: none; /* Hidden by default */
+      z-index: 9998;
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.3s ease-in-out, transform 0.3s ease-in-out;
     }
-    #bibnat-chat-frame-container.open {
-      display: flex;
+    #bibnat-ai-container.open {
+      display: block;
+      opacity: 1;
+      transform: translateY(0);
     }
-    #bibnat-chat-frame {
-      width: 100%;
-      height: 100%;
-      border: none;
+    .bibnat-ai-icon-open {
+      transform: rotate(180deg);
     }
   `;
-  document.head.appendChild(style);
 
-  // --- Button ---
-  const chatButton = document.createElement('button');
-  chatButton.id = 'bibnat-chat-button';
-  chatButton.setAttribute('aria-label', 'Open chat');
-  chatButton.innerHTML = `
-    <svg class="chat-icon h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
-    </svg>
-    <svg class="close-icon h-8 w-8" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+  // 5. Inject styles into the page <head>
+  const styleSheet = document.createElement("style");
+  styleSheet.type = "text/css";
+  styleSheet.innerText = styles;
+  document.head.appendChild(styleSheet);
+
+  // 6. Configure the widget button
+  widgetButton.id = 'bibnat-ai-button';
+  widgetButton.setAttribute('aria-label', 'Deschide asistentul AI');
+  const chatIconSVG = `
+    <svg id="bibnat-ai-chat-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 5.523-4.477 10-10 10S1 17.523 1 12 5.477 2 11 2s10 4.477 10 10z" />
     </svg>
   `;
+  const closeIconSVG = `
+    <svg id="bibnat-ai-close-icon" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" />
+    </svg>
+  `;
+  widgetButton.innerHTML = chatIconSVG;
 
-  // --- Iframe Container ---
-  const iframeContainer = document.createElement('div');
-  iframeContainer.id = 'bibnat-chat-frame-container';
+  // 7. Configure the widget container
+  widgetContainer.id = 'bibnat-ai-container';
+  widgetContainer.appendChild(chatIframe);
 
-  let iframe;
-  let isIframeLoaded = false;
-
-  function loadIframe() {
-    if (!isIframeLoaded) {
-      iframe = document.createElement('iframe');
-      iframe.id = 'bibnat-chat-frame';
-      iframe.src = WIDGET_URL;
-      iframeContainer.appendChild(iframe);
-      isIframeLoaded = true;
+  // 8. Add click event listener to the button
+  widgetButton.onclick = function() {
+    isChatOpen = !isChatOpen;
+    widgetContainer.classList.toggle('open');
+    if (isChatOpen) {
+      widgetButton.innerHTML = closeIconSVG;
+      widgetButton.setAttribute('aria-label', 'Închide asistentul AI');
+    } else {
+      widgetButton.innerHTML = chatIconSVG;
+      widgetButton.setAttribute('aria-label', 'Deschide asistentul AI');
     }
-  }
+  };
 
-  chatButton.addEventListener('click', () => {
-    loadIframe();
-    iframeContainer.classList.toggle('open');
-    chatButton.classList.toggle('open');
-    const isChatOpen = iframeContainer.classList.contains('open');
-    chatButton.setAttribute('aria-label', isChatOpen ? 'Close chat' : 'Open chat');
-  });
+  // 9. Append the elements to the body
+  document.body.appendChild(widgetButton);
+  document.body.appendChild(widgetContainer);
 
-  widgetContainer.appendChild(iframeContainer);
-  widgetContainer.appendChild(chatButton);
 })();
