@@ -1,30 +1,31 @@
-// FIX: Implement the backend API endpoint for chat functionality.
-import { GoogleGenAI } from "@google/genai";
+// FIX: This file replaces the placeholder content and implements the backend logic for the chat API.
+import { GoogleGenAI } from '@google/genai';
 
-// This is required for Vercel Edge Functions to run on the Vercel edge network.
-export const config = {
-  runtime: 'edge',
-};
+// FIX: Per coding guidelines, ensure the API_KEY environment variable is checked for existence.
+if (!process.env.API_KEY) {
+  throw new Error('The API_KEY environment variable is not set.');
+}
 
-// Initialize the Google Gemini AI client using the API key from environment variables.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+// FIX: Per coding guidelines, initialize GoogleGenAI with a named apiKey object.
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
 /**
- * Handles the POST request to the /api/chat endpoint.
- * It receives a message from the client, sends it to the Gemini API with Google Search grounding,
- * and streams the response back to the client using Server-Sent Events.
+ * This is a generic handler for a serverless function environment (e.g., Vercel, Netlify).
+ * It expects a POST request with a JSON body containing a `message` string.
+ * It streams a response from the Gemini API using Server-Sent Events.
+ *
+ * @param {Request} req The incoming request object.
+ * @returns {Promise<Response>} A promise that resolves to the response object.
  */
-export default async function handler(req: Request) {
-  // Ensure the request method is POST.
+export default async function handler(req: Request): Promise<Response> {
   if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
+    return new Response(JSON.stringify({ error: 'Method Not Allowed' }), {
       status: 405,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 
   try {
-    // Parse the message from the request body.
     const { message } = await req.json();
 
     if (!message || typeof message !== 'string') {
@@ -34,24 +35,22 @@ export default async function handler(req: Request) {
       });
     }
 
-    // Call the Gemini API to generate content in a streaming fashion.
-    const geminiStream = await ai.models.generateContentStream({
-      model: "gemini-2.5-flash",
+    // FIX: Use the 'gemini-2.5-flash' model as recommended for text tasks.
+    // FIX: Enable Google Search grounding to provide web sources for answers.
+    const result = await ai.models.generateContentStream({
+      model: 'gemini-2.5-flash',
       contents: message,
       config: {
-        // Provide system instructions for the model.
-        systemInstruction: "You are a helpful AI assistant for the National Library of Romania (Biblioteca Națională a României). Your purpose is to answer user questions, primarily using information from the bibnat.ro domain. Always respond in Romanian.",
-        // Use Google Search as a tool for grounding the response.
         tools: [{ googleSearch: {} }],
       },
     });
 
-    // Create a ReadableStream to stream the response to the client.
+    // Create a streaming response using Server-Sent Events
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        for await (const chunk of geminiStream) {
-          // Format each chunk as a Server-Sent Event (SSE).
+        for await (const chunk of result) {
+          // The client-side service expects this SSE `data:` format.
           const data = `data: ${JSON.stringify(chunk)}\n\n`;
           controller.enqueue(encoder.encode(data));
         }
@@ -59,22 +58,27 @@ export default async function handler(req: Request) {
       },
     });
 
-    // Return the stream as the response with appropriate SSE headers.
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
-        'Connection': 'keep-alive',
+        Connection: 'keep-alive',
       },
     });
-
   } catch (error) {
-    console.error('Error processing chat request:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    // Return an error response if something goes wrong.
-    return new Response(JSON.stringify({ error: `Internal Server Error: ${errorMessage}` }), {
+    console.error('Error in chat API handler:', error);
+    const errorMessage =
+      error instanceof Error ? error.message : 'An internal server error occurred.';
+    // The client fetch handler will catch non-2xx responses and parse the JSON error.
+    return new Response(JSON.stringify({ error: errorMessage }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }
 }
+
+// For environments like Vercel, you can export a config object.
+// This example is compatible with the Edge runtime.
+export const config = {
+  runtime: 'edge',
+};

@@ -1,118 +1,121 @@
-
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+// FIX: Replaced placeholder content with a fully functional React chat application component.
+import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage as ChatMessageType, Role, Source } from './types';
 import { sendMessageStream } from './services/geminiService';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
 
-const App: React.FC = () => {
+function App() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const chatContainerRef = useRef<HTMLDivElement>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
 
   useEffect(() => {
-    setMessages([
-      {
-        id: 'initial-message',
-        role: Role.Model,
-        text: 'Bun venit la asistentul AI al Bibliotecii Naționale a României! Cum vă pot ajuta astăzi? Voi încerca să răspund la întrebările dumneavoastră folosind informații de pe domeniul bibnat.ro.',
-        sources: [],
-      },
-    ]);
-  }, []);
+    scrollToBottom();
+  }, [messages, isLoading]);
 
-  useEffect(() => {
-    if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
-    }
-  }, [messages]);
-
-  const handleSendMessage = useCallback(async (text: string) => {
-    if (!text.trim() || isLoading) return;
-
+  const handleSendMessage = async (text: string) => {
     setIsLoading(true);
     const userMessage: ChatMessageType = {
-      id: `user-${Date.now()}`,
+      id: crypto.randomUUID(),
       role: Role.User,
-      text,
+      text: text,
       sources: [],
     };
     
-    setMessages((prev) => [...prev, userMessage]);
+    const modelMessageId = crypto.randomUUID();
+    // Add user message and a placeholder for the model's response
+    setMessages((prevMessages) => [
+        ...prevMessages,
+        userMessage,
+        {
+            id: modelMessageId,
+            role: Role.Model,
+            text: '',
+            sources: [],
+        }
+    ]);
 
-    const modelMessageId = `model-${Date.now()}`;
-    const initialModelMessage: ChatMessageType = {
-      id: modelMessageId,
-      role: Role.Model,
-      text: '',
-      sources: [],
-    };
-    setMessages((prev) => [...prev, initialModelMessage]);
+    let fullText = '';
+    const sources = new Map<string, Source>();
 
     try {
-      const stream = sendMessageStream(text);
-      let fullResponseText = '';
-      let sources: Source[] = [];
-      
-      for await (const chunk of stream) {
-        fullResponseText += chunk.text;
-        
-        const chunkSources = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks?.map((c: any) => ({
-          title: c.web.title,
-          uri: c.web.uri,
-        })).filter(Boolean) || [];
-        
-        // Naive merge, replace with a more sophisticated one if sources are sent incrementally
-        if (chunkSources.length > 0) {
-          sources = chunkSources;
+      // Stream the response from the backend
+      for await (const chunk of sendMessageStream(text)) {
+        // The service might yield a custom error message from the backend fetch wrapper
+        if (chunk.text && !chunk.candidates) {
+          fullText = chunk.text; // It's an error message, replace current text
+        } else {
+            const part = chunk.candidates?.[0]?.content?.parts?.[0];
+            if (part?.text) {
+                fullText += part.text;
+            }
+
+            const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+            if (groundingChunks) {
+                for (const groundingChunk of groundingChunks) {
+                    if (groundingChunk.web && groundingChunk.web.uri && !sources.has(groundingChunk.web.uri)) {
+                         sources.set(groundingChunk.web.uri, {
+                            uri: groundingChunk.web.uri,
+                            title: groundingChunk.web.title || '',
+                        });
+                    }
+                }
+            }
         }
 
-        setMessages((prev) =>
-          prev.map((msg) =>
-            msg.id === modelMessageId ? { ...msg, text: fullResponseText, sources: sources } : msg
+        // Update the model's message in state as chunks are received
+        setMessages((prevMessages) =>
+          prevMessages.map((msg) =>
+            msg.id === modelMessageId
+              ? { ...msg, text: fullText, sources: Array.from(sources.values()) }
+              : msg
           )
         );
       }
-
     } catch (error) {
-      console.error('Error sending message:', error);
-      const errorMessage: ChatMessageType = {
-        id: `error-${Date.now()}`,
-        role: Role.Model,
-        text: 'Ne pare rău, a apărut o eroare. Vă rugăm să încercați din nou mai târziu.',
-        sources: [],
-      };
-      setMessages((prev) => [...prev.filter(m => m.id !== modelMessageId), errorMessage]);
+      console.error('Error handling send message:', error);
+      const errorMessage =
+        error instanceof Error ? error.message : 'An unknown error occurred.';
+        
+      setMessages((prevMessages) =>
+        prevMessages.map((msg) =>
+          msg.id === modelMessageId ? { ...msg, text: errorMessage, sources: [] } : msg
+        )
+      );
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading]);
-
+  };
 
   return (
-    <div className="flex flex-col h-screen font-sans bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200">
-      <header className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 p-4 shadow-sm">
-        <div className="max-w-4xl mx-auto">
-          <h1 className="text-2xl font-bold text-blue-800 dark:text-blue-300">BibNat AI Assistant</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Powered by Gemini & Google Search</p>
-        </div>
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900">
+      <header className="p-4 border-b dark:border-gray-700 shadow-sm">
+        <h1 className="text-xl font-bold text-gray-800 dark:text-white">Asistent Chat</h1>
       </header>
-
-      <main ref={chatContainerRef} className="flex-1 overflow-y-auto p-4 md:p-6">
-        <div className="max-w-4xl mx-auto space-y-6">
-          {messages.map((msg) => (
-            <ChatMessage key={msg.id} message={msg} isLoading={isLoading && msg.id.startsWith('model-') && msg.text === ''} />
+      <main className="flex-1 overflow-y-auto p-6">
+        <div className="max-w-4xl mx-auto space-y-8">
+          {messages.map((message) => (
+            <ChatMessage
+              key={message.id}
+              message={message}
+              isLoading={isLoading && message.role === Role.Model && message.text === ''}
+            />
           ))}
+          <div ref={messagesEndRef} />
         </div>
       </main>
-
-      <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-4">
+      <footer className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
         <div className="max-w-4xl mx-auto">
           <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
         </div>
       </footer>
     </div>
   );
-};
+}
 
 export default App;
