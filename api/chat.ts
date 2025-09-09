@@ -1,6 +1,6 @@
 // FIX: Implement the backend API endpoint for chat, which was previously a placeholder.
 // This handler streams responses from the Google Gemini API using Vercel Edge Functions.
-import { GoogleGenAI } from '@google/genai';
+import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
 
 // This is required for Vercel Edge Functions, a common serverless platform for Vite projects.
 export const config = {
@@ -37,11 +37,16 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
+    // FINAL FIX: Force the search to be on the bibnat.ro domain
+    const contents = `site:bibnat.ro ${message}`;
+    const systemInstruction = "Ești un asistent virtual pentru Biblioteca Națională a României. Răspunde în limba română. Bazează-ți răspunsurile exclusiv pe sursele furnizate din domeniul bibnat.ro. Nu oferi informații din alte surse.";
+
     // Get a streaming response from the Gemini model.
     const result = await ai.models.generateContentStream({
       model: modelName,
-      contents: message,
+      contents: contents,
       config: {
+        systemInstruction: systemInstruction,
         // Enable Google Search grounding for up-to-date and factual answers.
         tools: [{ googleSearch: {} }],
       },
@@ -51,11 +56,16 @@ export default async function handler(req: Request): Promise<Response> {
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        // Iterate over the chunks from the Gemini API stream.
+        // The result is a promise that resolves to the stream
         for await (const chunk of result) {
-          // Format the chunk as a Server-Sent Event (SSE) and send it.
-          const jsonString = JSON.stringify(chunk);
-          controller.enqueue(encoder.encode(`data: ${jsonString}\n\n`));
+            // The .text is a getter that joins the text parts of the chunk.
+            // We create a new simple object to ensure the text property is serialized.
+            const dataToSend = {
+                text: chunk.text,
+                candidates: chunk.candidates,
+            };
+            const jsonString = JSON.stringify(dataToSend);
+            controller.enqueue(encoder.encode(`data: ${jsonString}\n\n`));
         }
         controller.close();
       },
