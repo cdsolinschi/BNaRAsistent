@@ -1,12 +1,26 @@
 // FIX: Replaced placeholder content with a fully functional React chat application component.
 import React, { useState, useEffect, useRef } from 'react';
 import { ChatMessage as ChatMessageType, Role, Source } from './types';
-import { sendMessageStream } from './services/geminiService';
+import { sendMessageStream, StreamedChatResponse } from './services/geminiService';
 import ChatMessage from './components/ChatMessage';
 import ChatInput from './components/ChatInput';
 
+const welcomeMessageText = `Bun venit! Sunt asistentul virtual al Bibliotecii Naționale a României.
+
+**Notă de confidențialitate:** Această conversație nu este înregistrată.
+**Sugestie:** Asistentul înțelege întrebările mai bine în limba engleză (English).
+
+Cum vă pot ajuta astăzi?`;
+
 function App() {
-  const [messages, setMessages] = useState<ChatMessageType[]>([]);
+  const [messages, setMessages] = useState<ChatMessageType[]>([
+    {
+      id: 'welcome-message',
+      role: Role.Model,
+      text: welcomeMessageText,
+      sources: [],
+    }
+  ]);
   const [isLoading, setIsLoading] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
@@ -46,34 +60,29 @@ function App() {
     try {
       // Stream the response from the backend
       for await (const chunk of sendMessageStream(text)) {
-        // The service might yield a custom error message from the backend fetch wrapper
-        if (chunk.text && !chunk.candidates) {
-          fullText = chunk.text; // It's an error message, replace current text
-        } else {
-            const part = chunk.candidates?.[0]?.content?.parts?.[0];
-            if (part?.text) {
-                fullText += part.text;
-            }
+        // The backend now sends a simple object with a 'text' property.
+        if (chunk.text) {
+          fullText += chunk.text;
+        }
 
-            const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
-            if (groundingChunks) {
-                for (const groundingChunk of groundingChunks) {
-                    if (groundingChunk.web && groundingChunk.web.uri && !sources.has(groundingChunk.web.uri)) {
-                         sources.set(groundingChunk.web.uri, {
-                            uri: groundingChunk.web.uri,
-                            title: groundingChunk.web.title || '',
-                        });
-                    }
+        const groundingChunks = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
+        if (groundingChunks) {
+            for (const groundingChunk of groundingChunks) {
+                if (groundingChunk.web && groundingChunk.web.uri && !sources.has(groundingChunk.web.uri)) {
+                      sources.set(groundingChunk.web.uri, {
+                        uri: groundingChunk.web.uri,
+                        title: groundingChunk.web.title || '',
+                    });
                 }
             }
         }
-
+        
         // Update the model's message in state as chunks are received
         setMessages((prevMessages) =>
           prevMessages.map((msg) =>
             msg.id === modelMessageId
               ? { ...msg, text: fullText, sources: Array.from(sources.values()) }
-              : msg
+                            : msg
           )
         );
       }
@@ -84,7 +93,7 @@ function App() {
         
       setMessages((prevMessages) =>
         prevMessages.map((msg) =>
-          msg.id === modelMessageId ? { ...msg, text: errorMessage, sources: [] } : msg
+          msg.id === modelMessageId ? { ...msg, text: `Eroare: ${errorMessage}`, sources: [] } : msg
         )
       );
     } finally {

@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { ChatMessage as ChatMessageType, Role } from '../types';
 import LoadingSpinner from './LoadingSpinner';
@@ -8,6 +7,21 @@ interface ChatMessageProps {
   message: ChatMessageType;
   isLoading: boolean;
 }
+
+// A simple component to render text with support for bolding (**text**).
+const FormattedMessage: React.FC<{ text: string }> = ({ text }) => {
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return (
+    <p className="whitespace-pre-wrap">
+      {parts.map((part, index) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          return <strong key={index}>{part.slice(2, -2)}</strong>;
+        }
+        return part;
+      })}
+    </p>
+  );
+};
 
 const UserIcon: React.FC = () => (
   <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
@@ -34,7 +48,7 @@ const ChatMessage: React.FC<ChatMessageProps> = ({ message, isLoading }) => {
           {isLoading ? (
             <LoadingSpinner />
           ) : (
-            <p className="whitespace-pre-wrap">{message.text}</p>
+            <FormattedMessage text={message.text} />
           )}
         </div>
         {message.sources && message.sources.length > 0 && (
