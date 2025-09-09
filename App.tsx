@@ -10,7 +10,12 @@ const welcomeMessageText = `Bun venit! Sunt asistentul virtual al Bibliotecii Na
 **Notă de confidențialitate:** Această conversație nu este înregistrată.
 **Sugestie:** Asistentul înțelege întrebările mai bine în limba engleză (English).
 
-Cum vă pot ajuta astăzi?`;
+Cum vă pot ajuta astăzi?
+Welcome! I am the AI assistant of the National Library of Romania.
+
+**Privacy Note:** This conversation is not recorded.
+
+How can I help you today?`;
 
 function App() {
   const [messages, setMessages] = useState<ChatMessageType[]>([
