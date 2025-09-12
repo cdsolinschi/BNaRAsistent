@@ -52,7 +52,7 @@ export async function* sendMessageStream(message: string): AsyncGenerator<Genera
     console.error("Error in sendMessageStream:", error);
     // Yield a final error message object to be displayed in the chat
     const errorResponse = {
-      text: "Scuze, a apărut o problemă de conexiune. Vă rugăm să reîncercați.",
+      text: "Scuze, a apărut o problemă de conexiune. Vă rugăm reîncercați.",
       candidates: [],
     };
     // FIX: The manually created errorResponse object does not fully match the GenerateContentResponse type.
