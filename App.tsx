@@ -1,141 +1,133 @@
-// FIX: Replaced placeholder with a functional React component.
 import React, { useState, useEffect, useRef } from 'react';
+import { ChatMessage as ChatMessageType, Role, Source } from './types';
 import ChatInput from './components/ChatInput';
 import ChatMessage from './components/ChatMessage';
-import { ChatMessage as ChatMessageType, Role, Source } from './types';
 import { sendMessageStream } from './services/geminiService';
 
-const App: React.FC = () => {
+// A simple unique ID generator
+const getUniqueId = () => `id-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+
+function App() {
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const chatContainerRef = useRef<HTMLDivElement>(null);
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  };
-
+  // Auto-scroll to the bottom of the chat on new messages
   useEffect(() => {
-    scrollToBottom();
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
   }, [messages]);
 
-  // Add an initial message from the model on component mount
-  useEffect(() => {
-    setMessages([
+  // Handle sending a message from the input
+  const handleSendMessage = async (text: string) => {
+    // Prevent sending messages while a response is being generated
+    if (isLoading) return;
+
+    const userMessage: ChatMessageType = {
+      id: getUniqueId(),
+      role: Role.User,
+      text,
+      sources: [],
+    };
+    
+    // Add user message and a placeholder for the model's response
+    const modelMessageId = getUniqueId();
+    setMessages((prev) => [
+      ...prev,
+      userMessage,
       {
-        id: crypto.randomUUID(),
+        id: modelMessageId,
         role: Role.Model,
-        text: 'Salut! Sunt asistentul tău AI pentru Biblioteca Națională. Cum te pot ajuta astăzi?',
+        text: '',
         sources: [],
       },
     ]);
-  }, []);
-
-  const handleSendMessage = async (text: string) => {
-    const userMessage: ChatMessageType = {
-      id: crypto.randomUUID(),
-      role: Role.User,
-      text: text,
-      sources: [],
-    };
-
-    const modelMessageId = crypto.randomUUID();
-    const modelMessage: ChatMessageType = {
-      id: modelMessageId,
-      role: Role.Model,
-      text: '',
-      sources: [],
-    };
-
-    setMessages((prevMessages) => [...prevMessages, userMessage, modelMessage]);
+    
     setIsLoading(true);
 
-    let fullResponseText = '';
-    let sources: Source[] = [];
-
     try {
+      let fullResponseText = '';
+      const sourceMap = new Map<string, Source>();
+
+      // Call the backend API and stream the response
       for await (const chunk of sendMessageStream(text)) {
-        if (chunk.text && !chunk.candidates) {
-          // This handles the custom error message from the service
-          fullResponseText = chunk.text;
-          sources = [];
-          break; // Stop processing further chunks
+        // Extract text from the chunk. Handle both regular text and potential error text.
+        const chunkText = chunk.candidates?.[0]?.content?.parts?.[0]?.text || chunk.text || '';
+        if (chunkText) {
+          fullResponseText += chunkText;
         }
 
-        fullResponseText +=
-          chunk.candidates?.[0]?.content?.parts?.[0]?.text || '';
-
-        const groundingChunks =
-          chunk.candidates?.[0]?.groundingMetadata?.groundingChunks;
-        if (groundingChunks) {
-          const newSources = groundingChunks
-            .map((c) => ({ uri: c.web.uri, title: c.web.title }))
-            .filter((s) => s.uri && s.title);
-
-          // Merge and deduplicate sources
-          const allSources = [...sources, ...newSources];
-          sources = [
-            ...new Map(allSources.map((item) => [item.uri, item])).values(),
-          ];
+        // Extract and deduplicate sources from grounding metadata
+        const chunkSources = chunk.candidates?.[0]?.groundingMetadata?.groundingChunks?.map(
+            (c: { web: { title: string; uri: string } }) => ({
+              title: c.web.title,
+              uri: c.web.uri,
+            })
+          ) || [];
+        
+        for (const source of chunkSources) {
+            if (source.uri && !sourceMap.has(source.uri)) {
+                sourceMap.set(source.uri, source);
+            }
         }
-
+        
+        // Update the model's message in the state with the new content
         setMessages((prev) =>
           prev.map((msg) =>
             msg.id === modelMessageId
-              ? { ...msg, text: fullResponseText, sources: sources }
-              : msg,
-          ),
+              ? { ...msg, text: fullResponseText, sources: Array.from(sourceMap.values()) }
+              : msg
+          )
         );
       }
     } catch (error) {
-      console.error('Error sending message:', error);
-      fullResponseText =
-        'Scuze, a apărut o problemă de conexiune. Vă rugăm să reîncercați.';
-      sources = [];
-    } finally {
-      // Final update to ensure the complete message is set
+      console.error('Error streaming response:', error);
+      // Update the placeholder with a user-friendly error message
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === modelMessageId
-            ? { ...msg, text: fullResponseText, sources: sources }
-            : msg,
-        ),
+            ? { ...msg, text: 'Scuze, a apărut o problemă. Vă rugăm să reîncercați.' }
+            : msg
+        )
       );
+    } finally {
       setIsLoading(false);
     }
   };
 
+  // Set the initial welcome message when the component mounts
+  useEffect(() => {
+    setMessages([
+      {
+        id: getUniqueId(),
+        role: Role.Model,
+        text: 'Salut! Sunt asistentul virtual al Bibliotecii Naționale a României. Cum te pot ajuta astăzi?',
+        sources: [],
+      }
+    ]);
+  }, []);
+
   return (
-    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900 font-sans">
-      <header className="p-4 border-b dark:border-gray-700 shadow-sm bg-white dark:bg-gray-800">
-        <h1 className="text-xl font-bold text-gray-800 dark:text-white text-center">
-          Asistent AI - Biblioteca Națională
-        </h1>
+    <div className="flex flex-col h-screen bg-gray-50 dark:bg-gray-900 text-gray-800 dark:text-gray-200 font-sans">
+      <header className="p-4 border-b dark:border-gray-700 shadow-sm bg-white dark:bg-gray-800 flex-shrink-0">
+        <h1 className="text-xl font-bold text-gray-900 dark:text-white text-center">Asistent AI - BibNat</h1>
       </header>
-      <div className="flex-1 overflow-y-auto p-4 md:p-6">
-        <div className="max-w-3xl mx-auto space-y-6">
-          {messages.map((message) => (
-            <ChatMessage
-              key={message.id}
-              message={message}
-              isLoading={
-                isLoading && message.id === messages[messages.length - 1].id
-              }
-            />
-          ))}
-          <div ref={messagesEndRef} />
-        </div>
-      </div>
-      <footer className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700">
-        <div className="max-w-3xl mx-auto">
-          <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
-          <p className="text-xs text-center text-gray-500 dark:text-gray-400 mt-3">
-            Asistentul AI poate face greșeli. Verificați informațiile
-            importante.
-          </p>
-        </div>
+      <main ref={chatContainerRef} className="flex-1 overflow-y-auto p-6 space-y-6">
+        {messages.map((msg, index) => (
+          <ChatMessage
+            key={msg.id}
+            message={msg}
+            // Show loading spinner only for the last message if it's from the model and we are loading
+            isLoading={isLoading && index === messages.length - 1 && msg.role === Role.Model}
+          />
+        ))}
+      </main>
+      <footer className="p-4 bg-white dark:bg-gray-800 border-t dark:border-gray-700 flex-shrink-0">
+        <ChatInput onSendMessage={handleSendMessage} isLoading={isLoading} />
       </footer>
     </div>
   );
-};
+}
 
 export default App;
