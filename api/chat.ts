@@ -1,18 +1,14 @@
-// FIX: Implement the backend API endpoint for chat, which was previously a placeholder.
-// This handler streams responses from the Google Gemini API using Vercel Edge Functions.
-import { GoogleGenAI, GenerateContentResponse } from '@google/genai';
+// FIX: Implemented the full backend for the chat API endpoint.
+import { GoogleGenAI } from '@google/genai';
 
-// This is required for Vercel Edge Functions, a common serverless platform for Vite projects.
+// Tell Vercel to run this as an edge function for streaming support
 export const config = {
   runtime: 'edge',
 };
 
-/**
- * API handler for the /api/chat route.
- * It streams responses from the Google Gemini API.
- */
-export default async function handler(req: Request): Promise<Response> {
-  // Ensure the request is a POST request.
+// The main handler for the /api/chat route
+export default async function handler(req: Request) {
+  // We only want to handle POST requests
   if (req.method !== 'POST') {
     return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
@@ -21,13 +17,7 @@ export default async function handler(req: Request): Promise<Response> {
   }
 
   try {
-    // The API key is expected to be set as an environment variable.
-    if (!process.env.API_KEY) {
-      throw new Error("API_KEY environment variable is not set");
-    }
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-    const modelName = 'gemini-2.5-flash';
-    
+    // Parse the request body to get the user's message
     const { message } = await req.json();
 
     if (!message || typeof message !== 'string') {
@@ -37,41 +27,49 @@ export default async function handler(req: Request): Promise<Response> {
       });
     }
 
-    // FINAL FIX: Force the search to be on the bibnat.ro domain
-    const contents = `site:bibnat.ro ${message}`;
-    const systemInstruction = "Ești un asistent virtual pentru Biblioteca Națională a României. Răspunde în limba română. Bazează-ți răspunsurile exclusiv pe sursele furnizate din domeniul bibnat.ro. Nu oferi informații din alte surse.";
+    // Initialize the Google Gemini AI client with the API key from environment variables
+    // As per guidelines, process.env.API_KEY is assumed to be available.
+    const ai = new GoogleGenAI({apiKey: process.env.API_KEY!});
 
-    // Get a streaming response from the Gemini model.
-    const result = await ai.models.generateContentStream({
-      model: modelName,
-      contents: contents,
+    // Call the model to generate content in a streaming fashion
+    const streamingResponse = await ai.models.generateContentStream({
+      model: 'gemini-2.5-flash',
+      contents: message,
       config: {
-        systemInstruction: systemInstruction,
-        // Enable Google Search grounding for up-to-date and factual answers.
+        systemInstruction: 'You are a helpful and friendly virtual assistant for the National Library of Romania (Biblioteca Națională a României). Your purpose is to assist users with inquiries related to the library, its collections, services, and Romanian culture and history. Answer user questions based on the provided search results. Your answers must always be in Romanian.',
         tools: [{ googleSearch: {} }],
       },
     });
 
-    // Create a new ReadableStream to send data to the client.
+    // Create a streaming response using the ReadableStream API
     const stream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder();
-        // The result is a promise that resolves to the stream
-        for await (const chunk of result) {
-            // The .text is a getter that joins the text parts of the chunk.
-            // We create a new simple object to ensure the text property is serialized.
-            const dataToSend = {
-                text: chunk.text,
-                candidates: chunk.candidates,
-            };
-            const jsonString = JSON.stringify(dataToSend);
-            controller.enqueue(encoder.encode(`data: ${jsonString}\n\n`));
+        try {
+          // Iterate over the chunks from the Gemini API
+          for await (const chunk of streamingResponse) {
+            // Format the chunk as a Server-Sent Event (SSE)
+            // The frontend expects a JSON object. JSON.stringify correctly handles
+            // the GenerateContentResponse object from the SDK, including the .text getter.
+            const data = `data: ${JSON.stringify(chunk)}\n\n`;
+            controller.enqueue(encoder.encode(data));
+          }
+        } catch (error) {
+          console.error('Error during stream processing:', error);
+          // Send an error message to the client through the stream
+          const errorChunk = {
+            text: 'A apărut o eroare în timpul procesării răspunsului. Vă rugăm să reîncercați.',
+          };
+          const data = `data: ${JSON.stringify(errorChunk)}\n\n`;
+          controller.enqueue(encoder.encode(data));
+        } finally {
+          // Close the stream when we're done
+          controller.close();
         }
-        controller.close();
       },
     });
 
-    // Return the stream as the response.
+    // Return the stream as the response
     return new Response(stream, {
       headers: {
         'Content-Type': 'text/event-stream',
@@ -79,10 +77,12 @@ export default async function handler(req: Request): Promise<Response> {
         'Connection': 'keep-alive',
       },
     });
+
   } catch (error) {
-    console.error('Error in /api/chat:', error);
-    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred';
-    // Return an error response if something goes wrong.
+    console.error('Error in chat API handler:', error);
+    const errorMessage = error instanceof Error ? error.message : 'An unknown error occurred.';
+    
+    // For top-level errors (e.g., failed to parse JSON), return a standard HTTP error
     return new Response(JSON.stringify({ error: `Internal Server Error: ${errorMessage}` }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
