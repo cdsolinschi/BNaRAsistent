@@ -1,96 +1,99 @@
-import { GoogleGenAI } from "@google/genai";
+// FIX: Replaced placeholder content with a functional serverless API endpoint.
+// This file acts as a secure backend to handle communication with the Gemini API.
+import { GoogleGenAI } from '@google/genai';
 
-// FIX: Implement the backend API endpoint for streaming chat responses from the Gemini API.
-// This is a Vercel Edge Function that streams Server-Sent Events to the client.
-
-// Throws an error if the API key is not set in the environment variables.
-// This key should be configured in your Vercel project settings.
-if (!process.env.API_KEY) {
-  throw new Error("The API_KEY environment variable is not set.");
-}
-
-// Initialize the Google Gemini API client with the API key.
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-
-// Configure the runtime environment to 'edge' for optimal streaming performance.
-export const config = {
-  runtime: "edge",
-};
+// Specifies the Vercel Edge Runtime for efficient streaming.
+export const runtime = 'edge';
 
 /**
- * The main handler for the API endpoint. It handles POST requests to /api/chat.
- * @param {Request} req The incoming request object.
- * @returns {Promise<Response>} A streaming response with Server-Sent Events.
+ * Handles POST requests to the /api/chat endpoint.
+ * It streams responses from the Google Gemini API to the client.
+ * @param req The incoming request object.
+ * @returns A streaming Response object.
  */
-export default async function handler(req: Request): Promise<Response> {
-  // Only allow POST requests.
-  if (req.method !== "POST") {
-    return new Response(JSON.stringify({ error: "Method Not Allowed" }), {
+export default async function handler(req: Request) {
+  // Ensure the request is a POST request.
+  if (req.method !== 'POST') {
+    return new Response(JSON.stringify({ error: 'Method not allowed' }), {
       status: 405,
-      headers: { "Content-Type": "application/json" },
+      headers: { 'Content-Type': 'application/json' },
     });
   }
 
   try {
-    // Parse the 'message' from the request body.
+    // 1. Extract the user's message from the request body.
     const { message } = await req.json();
 
-    if (!message || typeof message !== "string") {
+    if (!message) {
+      return new Response(JSON.stringify({ error: 'Message is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // 2. Verify that the API key is set in the environment variables.
+    if (!process.env.API_KEY) {
+      // This error is sent to the client and should be handled there.
       return new Response(
-        JSON.stringify({ error: "A valid message string is required" }),
+        JSON.stringify({
+          error:
+            'API key not found. Please configure the API_KEY environment variable.',
+        }),
         {
-          status: 400,
-          headers: { "Content-Type": "application/json" },
-        }
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        },
       );
     }
 
-    // Call the Gemini API to generate content in a streaming fashion.
-    // We use Google Search for grounding to get up-to-date information.
-    const streamingResponse = await ai.models.generateContentStream({
-      model: "gemini-2.5-flash",
+    // 3. Initialize the Google GenAI client.
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+
+    // 4. Request a streaming response from the Gemini model.
+    // We enable search grounding to get up-to-date information.
+    const stream = await ai.models.generateContentStream({
+      model: 'gemini-2.5-flash',
       contents: message,
       config: {
         tools: [{ googleSearch: {} }],
       },
     });
 
-    // Create a TransformStream to format the output from the Gemini API
-    // into Server-Sent Events (SSE) format.
-    const { readable, writable } = new TransformStream({
-      transform(chunk, controller) {
-        // The Gemini SDK yields GenerateContentResponse objects.
-        // We serialize the entire chunk to JSON and send it in SSE format.
-        const sse = `data: ${JSON.stringify(chunk)}\n\n`;
-        controller.enqueue(new TextEncoder().encode(sse));
+    // 5. Create a ReadableStream to send Server-Sent Events (SSE) to the client.
+    const responseStream = new ReadableStream({
+      async start(controller) {
+        const encoder = new TextEncoder();
+        // 6. Iterate over the chunks from the Gemini API stream.
+        for await (const chunk of stream) {
+          // The frontend expects a JSON string for each event.
+          // Note: The `text` getter from the SDK's `GenerateContentResponse` chunk
+          // is not serialized, but the frontend client is designed to reconstruct
+          // the full text from the `candidates` array.
+          const jsonString = JSON.stringify(chunk);
+          const data = `data: ${jsonString}\n\n`;
+          controller.enqueue(encoder.encode(data));
+        }
+        // 7. Close the stream when all chunks have been sent.
+        controller.close();
       },
     });
 
-    // Pipe the stream from the Gemini API through our transformer.
-    streamingResponse.stream.pipeTo(writable);
-
-    // Return the readable stream as the response to the client.
-    return new Response(readable, {
+    // 8. Return the streaming response to the client.
+    return new Response(responseStream, {
       headers: {
-        "Content-Type": "text/event-stream",
-        "Cache-Control": "no-cache",
-        Connection: "keep-alive",
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
       },
     });
   } catch (error) {
-    console.error("Error in /api/chat:", error);
+    console.error('Error in /api/chat:', error);
     const errorMessage =
-      error instanceof Error ? error.message : "An unexpected error occurred.";
-    // Note: In an edge runtime, if the stream has already started, the client
-    // might not receive this HTTP error. The client-side logic should handle
-    // abrupt stream termination.
-    return new Response(
-      JSON.stringify({ error: `API Error: ${errorMessage}` }),
-      {
-        status: 500,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
+      error instanceof Error ? error.message : 'An unknown error occurred';
+    // This will be caught by the frontend's `!response.ok` check.
+    return new Response(JSON.stringify({ error: errorMessage }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }
-
